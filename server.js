@@ -1,91 +1,142 @@
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const http = require('http');
+const https = require('https');
+const url = require('url');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
-const path = require('path');
-const ProxyHandler = require('./lib/proxy-handler');
-const IPRotator = require('./lib/ip-rotator');
+const zlib = require('zlib');
+const BareServer = require('./lib/bare-server');
+const RequestHandler = require('./lib/request-handler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Security middleware
+// Initialize bare server
+const bareServer = new BareServer();
+const requestHandler = new RequestHandler(bareServer);
+
+// Security middleware with iframe support
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable for iframe functionality
-  crossOriginEmbedderPolicy: false
-}));
-
-// CORS configuration
-app.use(cors({
-  origin: '*',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
-
-// Initialize IP rotator and proxy handler
-const ipRotator = new IPRotator();
-const proxyHandler = new ProxyHandler(ipRotator);
-
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    activeProxies: ipRotator.getActiveProxyCount()
-  });
-});
-
-// Scramjet proxy endpoint
-app.use('/scramjet/*', createProxyMiddleware({
-  target: 'https://now.gg',
-  changeOrigin: true,
-  pathRewrite: {
-    '^/scramjet': ''
-  },
-  onProxyReq: (proxyReq, req, res) => {
-    // Add custom headers
-    proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    proxyReq.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
-    
-    // Use rotating IP if available
-    const currentProxy = ipRotator.getCurrentProxy();
-    if (currentProxy) {
-      console.log(`Using proxy: ${currentProxy.host}:${currentProxy.port}`);
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      frameSrc: ["'self'", "https://now.gg", "https://*.now.gg"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https:", "wss:", "ws:"]
     }
   },
-  onError: (err, req, res) => {
-    console.error('Proxy error:', err);
-    ipRotator.markProxyAsFailed();
-    res.status(500).json({ error: 'Proxy connection failed' });
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false
+}));
+
+// CORS configuration for iframe embedding
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['*']
+}));
+
+// Parse JSON and URL encoded data
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static files
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, path) => {
+    // Remove X-Frame-Options for static files
+    res.removeHeader('X-Frame-Options');
   }
 }));
 
-// Main proxy route for now.gg
-app.use('/proxy/*', (req, res, next) => {
-  proxyHandler.handleRequest(req, res, next);
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    server: 'bare-proxy',
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
+  });
 });
 
-// Catch-all route
+// Bare server endpoints for direct proxying
+app.use('/bare/v1', (req, res, next) => {
+  requestHandler.handleBareRequest(req, res, next);
+});
+
+// Legacy scramjet-style endpoint that redirects to bare
+app.use('/scramjet/*', (req, res, next) => {
+  const targetUrl = req.url.replace('/scramjet/', '');
+  const fullUrl = targetUrl.startsWith('http') ? targetUrl : `https://now.gg/${targetUrl}`;
+  
+  // Redirect to bare server endpoint
+  const bareUrl = `/bare/v1/proxy?url=${encodeURIComponent(fullUrl)}`;
+  req.url = bareUrl;
+  req.originalUrl = bareUrl;
+  
+  requestHandler.handleBareRequest(req, res, next);
+});
+
+// Direct proxy endpoint for now.gg
+app.use('/proxy/*', (req, res, next) => {
+  const targetPath = req.url.replace('/proxy', '');
+  const targetUrl = `https://now.gg${targetPath}`;
+  
+  requestHandler.proxyRequest(targetUrl, req, res);
+});
+
+// WebSocket upgrade handling for real-time features
+const server = http.createServer(app);
+
+server.on('upgrade', (req, socket, head) => {
+  if (req.url.startsWith('/bare/')) {
+    bareServer.handleWebSocket(req, socket, head);
+  } else {
+    socket.destroy();
+  }
+});
+
+// Catch-all route - serve main app
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Now.gg proxy server running on port ${PORT}`);
-  console.log(`Access the proxy at: http://localhost:${PORT}`);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
   
-  // Initialize IP rotation
-  ipRotator.startRotation();
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: 'Internal server error',
+      message: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Start server
+server.listen(PORT, () => {
+  console.log(`Bare proxy server running on port ${PORT}`);
+  console.log(`Now.gg proxy available at: http://localhost:${PORT}`);
+  console.log(`Bare server endpoint: http://localhost:${PORT}/bare/v1/`);
+  console.log(`Direct proxy: http://localhost:${PORT}/proxy/`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('Shutting down gracefully...');
-  ipRotator.stopRotation();
-  process.exit(0);
+  server.close(() => {
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('Shutting down gracefully...');
+  server.close(() => {
+    process.exit(0);
+  });
 });
