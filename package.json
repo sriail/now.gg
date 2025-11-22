@@ -1,7 +1,7 @@
 {
-  "name": "nowgg-proxy",
+  "name": "nowgg-bare-proxy",
   "version": "1.0.0",
-  "description": "Web proxy for now.gg with rotating IP and Scramjet integration",
+  "description": "Bare proxy server for now.gg - no external proxies required",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,18 +9,17 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
+    "bare-server",
     "proxy",
     "nowgg",
     "gaming",
     "web-proxy",
-    "scramjet",
-    "rotating-ip"
+    "direct-proxy"
   ],
-  "author": "sriail",
+  "author": "sriailcan",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
-    "http-proxy-middleware": "^2.0.6",
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "dotenv": "^16.3.1"
