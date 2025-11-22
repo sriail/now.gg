@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Now.gg Proxy</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Now.gg Proxy</h1>
+            <div class="controls">
+                <button id="refreshBtn" class="btn">Refresh</button>
+                <button id="fullscreenBtn" class="btn">Fullscreen</button>
+                <div class="status" id="status">
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span id="statusText">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="proxy-container">
+            <div class="loading" id="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading Now.gg through proxy...</p>
+            </div>
+
+            <iframe 
+                id="gameFrame"
+                src="/scramjet/https://now.gg"
+                frameborder="0"
+                allowfullscreen
+                allow="gamepad; microphone; camera; display-capture"
+                sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-pointer-lock">
+            </iframe>
+
+            <div class="error-container" id="errorContainer" style="display: none;">
+                <div class="error-message">
+                    <h3>Connection Error</h3>
+                    <p id="errorText">Failed to load Now.gg. The proxy might be experiencing issues.</p>
+                    <button id="retryBtn" class="btn btn-primary">Retry Connection</button>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <div class="proxy-info">
+                <span>Proxy Status: <span id="proxyStatus">Active</span></span>
+                <span>IP Rotation: <span id="rotationStatus">Enabled</span></span>
+                <span>Active Proxies: <span id="activeProxies">-</span></span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
