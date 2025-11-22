@@ -3,52 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Now.gg Proxy</title>
+    <title>Now.gg Bare Proxy</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <h1>Now.gg Proxy</h1>
+            <h1>Now.gg Bare Proxy</h1>
             <div class="controls">
                 <button id="refreshBtn" class="btn">Refresh</button>
                 <button id="fullscreenBtn" class="btn">Fullscreen</button>
+                <button id="homeBtn" class="btn">Now.gg Home</button>
                 <div class="status" id="status">
                     <span class="status-indicator" id="statusIndicator"></span>
-                    <span id="statusText">Connecting...</span>
+                    <span id="statusText">Initializing...</span>
                 </div>
             </div>
         </header>
 
+        <div class="url-bar">
+            <input type="text" id="urlInput" placeholder="Enter Now.gg game URL or search..." value="https://now.gg">
+            <button id="goBtn" class="btn btn-primary">Go</button>
+        </div>
+
         <div class="proxy-container">
             <div class="loading" id="loading">
                 <div class="loading-spinner"></div>
-                <p>Loading Now.gg through proxy...</p>
+                <p>Loading through bare proxy server...</p>
+                <small>Direct connection - no external proxies required</small>
             </div>
 
             <iframe 
                 id="gameFrame"
-                src="/scramjet/https://now.gg"
+                src=""
                 frameborder="0"
                 allowfullscreen
-                allow="gamepad; microphone; camera; display-capture"
-                sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-pointer-lock">
+                allow="gamepad; microphone; camera; display-capture; clipboard-read; clipboard-write"
+                sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-pointer-lock allow-top-navigation">
             </iframe>
 
             <div class="error-container" id="errorContainer" style="display: none;">
                 <div class="error-message">
                     <h3>Connection Error</h3>
-                    <p id="errorText">Failed to load Now.gg. The proxy might be experiencing issues.</p>
-                    <button id="retryBtn" class="btn btn-primary">Retry Connection</button>
+                    <p id="errorText">Failed to load the website. Please check the URL and try again.</p>
+                    <div class="error-actions">
+                        <button id="retryBtn" class="btn btn-primary">Retry</button>
+                        <button id="homeRetryBtn" class="btn">Try Now.gg Home</button>
+                    </div>
                 </div>
             </div>
         </div>
 
         <footer class="footer">
-            <div class="proxy-info">
-                <span>Proxy Status: <span id="proxyStatus">Active</span></span>
-                <span>IP Rotation: <span id="rotationStatus">Enabled</span></span>
-                <span>Active Proxies: <span id="activeProxies">-</span></span>
+            <div class="server-info">
+                <span>Server: <span id="serverType">Bare Proxy</span></span>
+                <span>Status: <span id="serverStatus">Active</span></span>
+                <span>Mode: <span id="proxyMode">Direct</span></span>
+                <span>Uptime: <span id="serverUptime">-</span></span>
+            </div>
+            <div class="help-text">
+                <small>This is a bare proxy server - no external proxies needed. Enter any Now.gg URL above.</small>
             </div>
         </footer>
     </div>
