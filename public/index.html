@@ -16,7 +16,7 @@
                 <button id="homeBtn" class="btn">Now.gg Home</button>
                 <div class="status" id="status">
                     <span class="status-indicator" id="statusIndicator"></span>
-                    <span id="statusText">Initializing...</span>
+                    <span id="statusText">Ready</span>
                 </div>
             </div>
         </header>
@@ -35,11 +35,10 @@
 
             <iframe 
                 id="gameFrame"
-                src=""
                 frameborder="0"
                 allowfullscreen
                 allow="gamepad; microphone; camera; display-capture; clipboard-read; clipboard-write"
-                sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-pointer-lock allow-top-navigation">
+                sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-pointer-lock allow-top-navigation allow-downloads">
             </iframe>
 
             <div class="error-container" id="errorContainer" style="display: none;">
@@ -59,7 +58,7 @@
                 <span>Server: <span id="serverType">Bare Proxy</span></span>
                 <span>Status: <span id="serverStatus">Active</span></span>
                 <span>Mode: <span id="proxyMode">Direct</span></span>
-                <span>Uptime: <span id="serverUptime">-</span></span>
+                <span>Requests: <span id="requestCount">0</span></span>
             </div>
             <div class="help-text">
                 <small>This is a bare proxy server - no external proxies needed. Enter any Now.gg URL above.</small>
