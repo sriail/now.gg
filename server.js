@@ -21,80 +21,133 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      frameSrc: ["'self'", "https://now.gg", "https://*.now.gg"],
+      frameSrc: ["'self'", "*"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https:", "wss:", "ws:"]
+      imgSrc: ["'self'", "data:", "*"],
+      connectSrc: ["'self'", "*"]
     }
   },
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false
 }));
 
-// CORS configuration for iframe embedding
+// Enhanced CORS configuration
 app.use(cors({
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
-  allowedHeaders: ['*']
+  allowedHeaders: ['*'],
+  exposedHeaders: ['*']
 }));
 
 // Parse JSON and URL encoded data
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, path) => {
-    // Remove X-Frame-Options for static files
     res.removeHeader('X-Frame-Options');
   }
 }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  console.log('Health check requested');
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     server: 'bare-proxy',
     uptime: process.uptime(),
-    memory: process.memoryUsage()
+    memory: process.memoryUsage(),
+    endpoints: {
+      proxy: '/bare/v1/proxy?url={target_url}',
+      info: '/bare/v1/info',
+      health: '/health'
+    }
   });
 });
 
-// Bare server endpoints for direct proxying
-app.use('/bare/v1', (req, res, next) => {
-  requestHandler.handleBareRequest(req, res, next);
+// Bare server info endpoint
+app.get('/bare/v1/info', (req, res) => {
+  console.log('Bare server info requested');
+  res.json({
+    server: 'bare-server-node',
+    version: '1.0.0',
+    language: 'NodeJS',
+    memoryUsage: process.memoryUsage(),
+    uptime: process.uptime(),
+    endpoints: {
+      proxy: '/bare/v1/proxy?url={target_url}',
+      websocket: '/bare/v1/ws?url={target_ws_url}',
+      info: '/bare/v1/info'
+    },
+    features: [
+      'HTTP/HTTPS proxy',
+      'Content rewriting',
+      'Header sanitization',
+      'Frame-bust prevention',
+      'CORS handling'
+    ]
+  });
 });
 
-// Legacy scramjet-style endpoint that redirects to bare
-app.use('/scramjet/*', (req, res, next) => {
+// Main bare proxy endpoint
+app.all('/bare/v1/proxy', async (req, res) => {
+  try {
+    console.log('Bare proxy request:', req.method, req.query.url);
+    await requestHandler.handleBareRequest(req, res);
+  } catch (error) {
+    console.error('Bare proxy error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Proxy request failed',
+        message: error.message
+      });
+    }
+  }
+});
+
+// Legacy endpoints for compatibility
+app.use('/scramjet/*', (req, res) => {
   const targetUrl = req.url.replace('/scramjet/', '');
   const fullUrl = targetUrl.startsWith('http') ? targetUrl : `https://now.gg/${targetUrl}`;
   
-  // Redirect to bare server endpoint
-  const bareUrl = `/bare/v1/proxy?url=${encodeURIComponent(fullUrl)}`;
-  req.url = bareUrl;
-  req.originalUrl = bareUrl;
+  console.log('Legacy scramjet request redirecting to:', fullUrl);
   
-  requestHandler.handleBareRequest(req, res, next);
+  // Redirect to bare proxy
+  const redirectUrl = `/bare/v1/proxy?url=${encodeURIComponent(fullUrl)}`;
+  res.redirect(302, redirectUrl);
 });
 
-// Direct proxy endpoint for now.gg
-app.use('/proxy/*', (req, res, next) => {
+app.use('/proxy/*', (req, res) => {
   const targetPath = req.url.replace('/proxy', '');
   const targetUrl = `https://now.gg${targetPath}`;
   
-  requestHandler.proxyRequest(targetUrl, req, res);
+  console.log('Legacy proxy request redirecting to:', targetUrl);
+  
+  // Redirect to bare proxy
+  const redirectUrl = `/bare/v1/proxy?url=${encodeURIComponent(targetUrl)}`;
+  res.redirect(302, redirectUrl);
 });
 
-// WebSocket upgrade handling for real-time features
+// Create HTTP server
 const server = http.createServer(app);
 
+// WebSocket upgrade handling (placeholder)
 server.on('upgrade', (req, socket, head) => {
-  if (req.url.startsWith('/bare/')) {
-    bareServer.handleWebSocket(req, socket, head);
+  console.log('WebSocket upgrade request:', req.url);
+  if (req.url.startsWith('/bare/v1/ws')) {
+    // TODO: Implement WebSocket proxying
+    socket.write('HTTP/1.1 501 Not Implemented\r\n\r\n');
+    socket.end();
   } else {
     socket.destroy();
   }
@@ -102,6 +155,7 @@ server.on('upgrade', (req, socket, head) => {
 
 // Catch-all route - serve main app
 app.get('*', (req, res) => {
+  console.log('Serving main app for:', req.url);
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -120,10 +174,14 @@ app.use((err, req, res, next) => {
 
 // Start server
 server.listen(PORT, () => {
-  console.log(`Bare proxy server running on port ${PORT}`);
-  console.log(`Now.gg proxy available at: http://localhost:${PORT}`);
-  console.log(`Bare server endpoint: http://localhost:${PORT}/bare/v1/`);
-  console.log(`Direct proxy: http://localhost:${PORT}/proxy/`);
+  console.log(`=================================`);
+  console.log(`🚀 Bare Proxy Server Started`);
+  console.log(`📡 Port: ${PORT}`);
+  console.log(`🌐 URL: http://localhost:${PORT}`);
+  console.log(`🔧 Proxy: /bare/v1/proxy?url={target}`);
+  console.log(`💡 Health: /health`);
+  console.log(`📊 Info: /bare/v1/info`);
+  console.log(`=================================`);
 });
 
 // Graceful shutdown
@@ -139,4 +197,14 @@ process.on('SIGINT', () => {
   server.close(() => {
     process.exit(0);
   });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
