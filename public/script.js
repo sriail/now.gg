@@ -9,10 +9,15 @@ class BareProxyClient {
         
         this.bareOrigin = window.location.origin;
         this.currentUrl = '';
+        this.requestCount = 0;
         
         this.initializeEventListeners();
-        this.startHealthCheck();
-        this.loadInitialPage();
+        this.checkServerHealth();
+        
+        // Load initial page after short delay
+        setTimeout(() => {
+            this.loadInitialPage();
+        }, 500);
     }
 
     initializeEventListeners() {
@@ -30,7 +35,10 @@ class BareProxyClient {
         });
 
         document.getElementById('goBtn').addEventListener('click', () => {
-            this.loadUrl(this.urlInput.value);
+            const url = this.urlInput.value.trim();
+            if (url) {
+                this.loadUrl(url);
+            }
         });
 
         document.getElementById('retryBtn').addEventListener('click', () => {
@@ -44,7 +52,10 @@ class BareProxyClient {
         // URL input events
         this.urlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                this.loadUrl(this.urlInput.value);
+                const url = this.urlInput.value.trim();
+                if (url) {
+                    this.loadUrl(url);
+                }
             }
         });
 
@@ -53,7 +64,8 @@ class BareProxyClient {
             this.onPageLoaded();
         });
 
-        this.iframe.addEventListener('error', () => {
+        this.iframe.addEventListener('error', (e) => {
+            console.error('Iframe error:', e);
             this.onPageError('Failed to load page content');
         });
 
@@ -71,15 +83,26 @@ class BareProxyClient {
                 this.urlInput.select();
             }
         });
+    }
 
-        // Handle visibility change
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                this.pauseHealthCheck();
+    async checkServerHealth() {
+        try {
+            console.log('Checking server health...');
+            const response = await fetch('/health');
+            const data = await response.json();
+            
+            if (data.status === 'ok') {
+                console.log('Server health check passed:', data);
+                this.updateStatus('Server ready', 'success');
+                document.getElementById('serverStatus').textContent = 'Ready';
             } else {
-                this.resumeHealthCheck();
+                throw new Error('Server health check failed');
             }
-        });
+        } catch (error) {
+            console.error('Server health check failed:', error);
+            this.updateStatus('Server unavailable', 'error');
+            document.getElementById('serverStatus').textContent = 'Offline';
+        }
     }
 
     loadInitialPage() {
@@ -89,42 +112,85 @@ class BareProxyClient {
     }
 
     loadUrl(targetUrl) {
+        console.log('Loading URL:', targetUrl);
+        
         // Validate and normalize URL
         if (!targetUrl) {
             targetUrl = 'https://now.gg';
         }
 
+        // Add protocol if missing
         if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
             targetUrl = 'https://' + targetUrl;
         }
 
+        // Validate URL format
         try {
-            new URL(targetUrl); // Validate URL
+            const testUrl = new URL(targetUrl);
+            console.log('Validated URL:', testUrl.href);
         } catch (error) {
-            this.showError('Invalid URL format');
+            console.error('Invalid URL:', error);
+            this.showError('Invalid URL format. Please enter a valid URL.');
             return;
         }
 
         this.currentUrl = targetUrl;
         this.urlInput.value = targetUrl;
+        this.requestCount++;
+        document.getElementById('requestCount').textContent = this.requestCount;
 
         this.showLoading();
         this.hideError();
-        this.updateStatus(`Loading ${new URL(targetUrl).hostname}...`, 'loading');
+        
+        const hostname = new URL(targetUrl).hostname;
+        this.updateStatus(`Connecting to ${hostname}...`, 'loading');
 
-        // Create bare proxy URL
+        // Test the bare proxy endpoint first
+        this.testBareEndpoint(targetUrl).then((success) => {
+            if (success) {
+                this.loadThroughIframe(targetUrl);
+            } else {
+                this.onPageError('Bare proxy endpoint not responding');
+            }
+        });
+    }
+
+    async testBareEndpoint(targetUrl) {
+        try {
+            const proxyUrl = `${this.bareOrigin}/bare/v1/proxy?url=${encodeURIComponent(targetUrl)}`;
+            console.log('Testing bare endpoint:', proxyUrl);
+            
+            const response = await fetch(proxyUrl, {
+                method: 'HEAD',
+                cache: 'no-cache'
+            });
+            
+            console.log('Bare endpoint test response:', response.status, response.statusText);
+            return response.ok;
+        } catch (error) {
+            console.error('Bare endpoint test failed:', error);
+            return false;
+        }
+    }
+
+    loadThroughIframe(targetUrl) {
+        // Create the bare proxy URL
         const proxyUrl = `${this.bareOrigin}/bare/v1/proxy?url=${encodeURIComponent(targetUrl)}`;
         
-        console.log('Loading URL through bare proxy:', proxyUrl);
+        console.log('Loading iframe with URL:', proxyUrl);
         
-        // Add timestamp to prevent caching
-        const timestamp = Date.now();
-        this.iframe.src = `${proxyUrl}&t=${timestamp}`;
-
+        // Clear previous iframe source
+        this.iframe.src = '';
+        
         // Set loading timeout
         this.loadTimeout = setTimeout(() => {
-            this.onPageError('Page load timeout - please try again');
-        }, 30000);
+            this.onPageError('Page load timeout - server may be overloaded');
+        }, 45000); // Increased timeout for slow connections
+
+        // Load the URL in iframe
+        setTimeout(() => {
+            this.iframe.src = proxyUrl;
+        }, 100);
 
         // Update browser URL
         const newUrl = new URL(window.location);
@@ -133,14 +199,20 @@ class BareProxyClient {
     }
 
     refreshPage() {
+        console.log('Refreshing page...');
         if (this.currentUrl) {
-            this.loadUrl(this.currentUrl);
+            // Clear iframe and reload
+            this.iframe.src = '';
+            setTimeout(() => {
+                this.loadUrl(this.currentUrl);
+            }, 100);
         } else {
             this.loadUrl('https://now.gg');
         }
     }
 
     onPageLoaded() {
+        console.log('Page loaded successfully');
         clearTimeout(this.loadTimeout);
         this.hideLoading();
         this.hideError();
@@ -148,43 +220,53 @@ class BareProxyClient {
         const hostname = this.currentUrl ? new URL(this.currentUrl).hostname : 'Unknown';
         this.updateStatus(`Connected to ${hostname}`, 'success');
 
-        // Try to detect if content actually loaded
+        // Check if content is actually loaded
         setTimeout(() => {
-            this.checkIframeContent();
+            this.validateIframeContent();
         }, 2000);
     }
 
+    validateIframeContent() {
+        try {
+            // Try to check if iframe has content
+            const iframeWindow = this.iframe.contentWindow;
+            if (iframeWindow) {
+                console.log('Iframe content window accessible');
+            }
+        } catch (error) {
+            // CORS error is expected for cross-origin content
+            console.log('Iframe CORS restriction active (expected)');
+        }
+
+        // Additional check: see if iframe is at least trying to load
+        if (!this.iframe.src || this.iframe.src === 'about:blank') {
+            console.warn('Iframe src is empty or blank');
+            this.onPageError('Iframe failed to load content');
+        }
+    }
+
     onPageError(message) {
+        console.error('Page error:', message);
         clearTimeout(this.loadTimeout);
         this.hideLoading();
         this.showError(message);
         this.updateStatus('Connection failed', 'error');
     }
 
-    checkIframeContent() {
-        try {
-            // Try to access iframe (will fail due to CORS, which is expected)
-            const iframeDoc = this.iframe.contentDocument;
-            if (iframeDoc && iframeDoc.body.children.length === 0) {
-                this.onPageError('Page content failed to load');
-            }
-        } catch (e) {
-            // CORS error is expected and means content loaded successfully
-            console.log('Page loaded successfully (CORS restriction active)');
-        }
-    }
-
     showLoading() {
         this.loading.style.display = 'block';
+        this.iframe.style.display = 'none';
     }
 
     hideLoading() {
         this.loading.style.display = 'none';
+        this.iframe.style.display = 'block';
     }
 
     showError(message) {
         document.getElementById('errorText').textContent = message;
         this.errorContainer.style.display = 'block';
+        this.iframe.style.display = 'none';
     }
 
     hideError() {
@@ -194,6 +276,9 @@ class BareProxyClient {
     updateStatus(text, type = 'loading') {
         this.statusText.textContent = text;
         this.statusIndicator.className = `status-indicator ${type}`;
+        
+        // Log status changes
+        console.log(`Status: ${text} (${type})`);
     }
 
     toggleFullscreen() {
@@ -208,56 +293,10 @@ class BareProxyClient {
         }
     }
 
-    async startHealthCheck() {
-        this.healthCheckInterval = setInterval(async () => {
-            try {
-                const response = await fetch('/health');
-                const data = await response.json();
-                
-                if (data.status === 'ok') {
-                    document.getElementById('serverStatus').textContent = 'Active';
-                    document.getElementById('serverUptime').textContent = this.formatUptime(data.uptime);
-                    
-                    if (this.statusIndicator.classList.contains('error')) {
-                        this.updateStatus('Server recovered', 'success');
-                    }
-                } else {
-                    document.getElementById('serverStatus').textContent = 'Issues';
-                }
-            } catch (error) {
-                document.getElementById('serverStatus').textContent = 'Offline';
-                console.error('Health check failed:', error);
-            }
-        }, 10000);
-    }
-
-    pauseHealthCheck() {
-        if (this.healthCheckInterval) {
-            clearInterval(this.healthCheckInterval);
-        }
-    }
-
-    resumeHealthCheck() {
-        this.startHealthCheck();
-    }
-
-    formatUptime(seconds) {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-        
-        if (hours > 0) {
-            return `${hours}h ${minutes}m ${secs}s`;
-        } else if (minutes > 0) {
-            return `${minutes}m ${secs}s`;
-        } else {
-            return `${secs}s`;
-        }
-    }
-
-    // Utility method to get bare server info
-    async getBareServerInfo() {
+    // Debug method to test bare server directly
+    async testBareServer() {
         try {
+            console.log('Testing bare server info endpoint...');
             const response = await fetch('/bare/v1/info');
             const info = await response.json();
             console.log('Bare server info:', info);
@@ -267,18 +306,34 @@ class BareProxyClient {
             return null;
         }
     }
+
+    // Debug method to test direct proxy
+    async testDirectProxy(url = 'https://httpbin.org/get') {
+        try {
+            console.log('Testing direct proxy with:', url);
+            const proxyUrl = `${this.bareOrigin}/bare/v1/proxy?url=${encodeURIComponent(url)}`;
+            const response = await fetch(proxyUrl);
+            const text = await response.text();
+            console.log('Direct proxy test result:', response.status, text.substring(0, 200));
+            return response.ok;
+        } catch (error) {
+            console.error('Direct proxy test failed:', error);
+            return false;
+        }
+    }
 }
 
 // Initialize the bare proxy client when the page loads
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('Initializing Bare Proxy Client...');
     window.bareProxy = new BareProxyClient();
     
-    // Log server info
-    window.bareProxy.getBareServerInfo().then(info => {
-        if (info) {
-            console.log('Bare proxy server ready:', info);
-        }
-    });
+    // Add debug methods to window for testing
+    window.testBareServer = () => window.bareProxy.testBareServer();
+    window.testDirectProxy = (url) => window.bareProxy.testDirectProxy(url);
+    
+    console.log('Bare Proxy Client initialized');
+    console.log('Debug methods available: testBareServer(), testDirectProxy(url)');
 });
 
 // Handle browser back/forward navigation
@@ -287,10 +342,3 @@ window.addEventListener('popstate', (event) => {
         window.bareProxy.loadUrl(event.state.url);
     }
 });
-
-// Service worker registration for enhanced caching
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(error => {
-        console.log('Service Worker registration failed:', error);
-    });
-}
