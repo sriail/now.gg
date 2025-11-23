@@ -89,6 +89,35 @@ body {
     50% { opacity: 0.5; }
 }
 
+.url-bar {
+    padding: 15px 20px;
+    background: #2d2d2d;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px solid #444;
+}
+
+.url-bar input {
+    flex: 1;
+    padding: 10px 15px;
+    background: #1a1a1a;
+    border: 2px solid #444;
+    border-radius: 5px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.3s ease;
+}
+
+.url-bar input:focus {
+    border-color: #00ff88;
+}
+
+.url-bar input::placeholder {
+    color: #888;
+}
+
 .proxy-container {
     flex: 1;
     position: relative;
@@ -148,22 +177,40 @@ body {
     color: #ccc;
 }
 
+.error-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 15px;
+}
+
 .footer {
     background: #2d2d2d;
     padding: 10px 20px;
     border-top: 1px solid #444;
 }
 
-.proxy-info {
+.server-info {
     display: flex;
     gap: 20px;
     font-size: 12px;
     color: #aaa;
+    margin-bottom: 8px;
 }
 
-.proxy-info span {
+.server-info span {
     display: flex;
     gap: 5px;
+}
+
+.help-text {
+    font-size: 11px;
+    color: #888;
+    text-align: center;
+}
+
+.help-text small {
+    display: block;
 }
 
 /* Fullscreen styles */
