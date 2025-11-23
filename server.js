@@ -57,11 +57,18 @@ app.get('/bare/v1/info', (req, res) => {
 // Simple proxy function
 function simpleProxy(targetUrl, req, res) {
   console.log(`🔄 Proxying request to: ${targetUrl}`);
+  console.log(`   Method: ${req.method}`);
+  console.log(`   Client IP: ${req.ip || req.connection.remoteAddress}`);
   
   try {
     const parsedUrl = new URL(targetUrl);
     const isHttps = parsedUrl.protocol === 'https:';
     const httpModule = isHttps ? https : http;
+    
+    console.log(`   Protocol: ${parsedUrl.protocol}`);
+    console.log(`   Hostname: ${parsedUrl.hostname}`);
+    console.log(`   Port: ${parsedUrl.port || (isHttps ? 443 : 80)}`);
+    console.log(`   Path: ${parsedUrl.pathname + parsedUrl.search}`);
     
     const options = {
       hostname: parsedUrl.hostname,
@@ -86,6 +93,9 @@ function simpleProxy(targetUrl, req, res) {
 
     const proxyReq = httpModule.request(options, (proxyRes) => {
       console.log(`📥 Response status: ${proxyRes.statusCode} from ${parsedUrl.hostname}`);
+      console.log(`📥 Response headers:`, Object.keys(proxyRes.headers).join(', '));
+      console.log(`📥 Content-Type: ${proxyRes.headers['content-type'] || 'not specified'}`);
+      console.log(`📥 Content-Length: ${proxyRes.headers['content-length'] || 'not specified'}`);
       
       // Remove problematic headers
       const headers = { ...proxyRes.headers };
@@ -103,27 +113,51 @@ function simpleProxy(targetUrl, req, res) {
       
       // Pipe the response
       proxyRes.pipe(res);
+      
+      // Log completion
+      proxyRes.on('end', () => {
+        console.log(`✅ Response completed for ${parsedUrl.hostname}`);
+      });
     });
 
     proxyReq.on('error', (error) => {
       console.error(`❌ Proxy request error for ${targetUrl}:`, error.message);
+      console.error(`   Error code: ${error.code || 'UNKNOWN'}`);
+      console.error(`   Error stack:`, error.stack);
+      
       if (!res.headersSent) {
+        const errorMessages = {
+          'ENOTFOUND': `DNS lookup failed for ${parsedUrl.hostname}. The domain may not exist or DNS is unreachable.`,
+          'ECONNREFUSED': `Connection refused by ${parsedUrl.hostname}. The server may be down or blocking connections.`,
+          'ETIMEDOUT': `Connection timeout to ${parsedUrl.hostname}. The server is taking too long to respond.`,
+          'ECONNRESET': `Connection was reset by ${parsedUrl.hostname}. The server closed the connection.`,
+          'EHOSTUNREACH': `Host ${parsedUrl.hostname} is unreachable. Network routing issue.`,
+          'ENETUNREACH': `Network unreachable for ${parsedUrl.hostname}. Check your network connection.`
+        };
+        
+        const friendlyMessage = errorMessages[error.code] || `Failed to connect to ${parsedUrl.hostname}: ${error.message}`;
+        
         res.status(502).json({
           error: 'Bad Gateway',
-          message: `Failed to connect to ${parsedUrl.hostname}: ${error.message}`,
-          target: targetUrl
+          message: friendlyMessage,
+          target: targetUrl,
+          errorCode: error.code || 'UNKNOWN',
+          timestamp: new Date().toISOString()
         });
       }
     });
 
     proxyReq.setTimeout(30000, () => {
       console.error(`⏰ Request timeout for ${targetUrl}`);
+      console.error(`   Timeout threshold: 30000ms`);
       proxyReq.destroy();
       if (!res.headersSent) {
         res.status(504).json({
           error: 'Gateway Timeout',
-          message: 'Request took too long to complete',
-          target: targetUrl
+          message: `Request to ${parsedUrl.hostname} took too long to complete (>30s)`,
+          target: targetUrl,
+          timeout: 30000,
+          timestamp: new Date().toISOString()
         });
       }
     });
@@ -149,6 +183,16 @@ function simpleProxy(targetUrl, req, res) {
 
 // Main proxy endpoint
 app.all('/bare/v1/proxy', (req, res) => {
+  // Handle OPTIONS preflight request
+  if (req.method === 'OPTIONS') {
+    console.log('🔄 Handling CORS preflight request');
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+    res.header('Access-Control-Allow-Headers', '*');
+    res.header('Access-Control-Max-Age', '86400');
+    return res.status(204).send();
+  }
+  
   const targetUrl = req.query.url;
   
   if (!targetUrl) {
