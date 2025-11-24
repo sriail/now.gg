@@ -14,6 +14,7 @@ const PORT = process.env.PORT || 3000;
 // ============================================
 const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute window
 const RATE_LIMIT_MAX_REQUESTS = 100; // Max requests per window per IP
+const TRUST_PROXY = process.env.TRUST_PROXY === 'true'; // Only trust proxy headers if explicitly enabled
 const rateLimitStore = new Map();
 
 // Clean up old rate limit entries every minute
@@ -26,14 +27,21 @@ setInterval(() => {
     }
 }, RATE_LIMIT_WINDOW_MS);
 
+// Helper function to get client IP (works with Express req and http.IncomingMessage)
+function getClientIp(req) {
+    if (TRUST_PROXY) {
+        return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+               req.headers['x-real-ip'] || 
+               req.connection?.remoteAddress ||
+               req.socket?.remoteAddress || 
+               '0.0.0.0';
+    }
+    return req.connection?.remoteAddress || req.socket?.remoteAddress || '0.0.0.0';
+}
+
 // Rate limiting middleware using sliding window algorithm
 function rateLimiter(req, res, next) {
-    // Get client IP (support reverse proxy)
-    const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-                     req.headers['x-real-ip'] || 
-                     req.socket?.remoteAddress || 
-                     'unknown';
-    
+    const clientIp = getClientIp(req);
     const now = Date.now();
     
     if (!rateLimitStore.has(clientIp)) {
@@ -76,6 +84,34 @@ function rateLimiter(req, res, next) {
     res.set('X-RateLimit-Reset', new Date(clientData.windowStart + RATE_LIMIT_WINDOW_MS).toISOString());
     
     next();
+}
+
+// Rate limit check for WebSocket (returns true if allowed, false if rate limited)
+function checkRateLimit(clientIp) {
+    const now = Date.now();
+    
+    if (!rateLimitStore.has(clientIp)) {
+        rateLimitStore.set(clientIp, {
+            windowStart: now,
+            count: 1
+        });
+        return true;
+    }
+    
+    const clientData = rateLimitStore.get(clientIp);
+    
+    if (now - clientData.windowStart > RATE_LIMIT_WINDOW_MS) {
+        clientData.windowStart = now;
+        clientData.count = 1;
+        return true;
+    }
+    
+    if (clientData.count >= RATE_LIMIT_MAX_REQUESTS) {
+        return false;
+    }
+    
+    clientData.count++;
+    return true;
 }
 
 // ============================================
@@ -209,37 +245,53 @@ function rewriteHtmlUrls(html, baseUrl) {
         const injectedScript = `
 <script>
 (function() {
-    // Override fetch to proxy requests
-    const originalFetch = window.fetch;
-    window.fetch = function(url, options) {
-        if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//'))) {
-            const proxyUrl = '/bare/v1/proxy?url=' + encodeURIComponent(url.startsWith('//') ? 'https:' + url : url);
-            return originalFetch.call(this, proxyUrl, options);
+    try {
+        // Override fetch to proxy requests
+        if (window.fetch) {
+            const originalFetch = window.fetch;
+            window.fetch = function(url, options) {
+                try {
+                    if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//'))) {
+                        const proxyUrl = '/bare/v1/proxy?url=' + encodeURIComponent(url.startsWith('//') ? 'https:' + url : url);
+                        return originalFetch.call(this, proxyUrl, options);
+                    }
+                } catch (e) { /* fallback to original */ }
+                return originalFetch.apply(this, arguments);
+            };
         }
-        return originalFetch.apply(this, arguments);
-    };
-    
-    // Override XMLHttpRequest open
-    const originalXHROpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
-        if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//'))) {
-            url = '/bare/v1/proxy?url=' + encodeURIComponent(url.startsWith('//') ? 'https:' + url : url);
+        
+        // Override XMLHttpRequest open
+        if (XMLHttpRequest && XMLHttpRequest.prototype.open) {
+            const originalXHROpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+                try {
+                    if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//'))) {
+                        url = '/bare/v1/proxy?url=' + encodeURIComponent(url.startsWith('//') ? 'https:' + url : url);
+                    }
+                } catch (e) { /* fallback to original */ }
+                return originalXHROpen.call(this, method, url, async, user, password);
+            };
         }
-        return originalXHROpen.call(this, method, url, async, user, password);
-    };
-    
-    // Override WebSocket for real-time connections
-    const OriginalWebSocket = window.WebSocket;
-    window.WebSocket = function(url, protocols) {
-        // Convert ws/wss to http/https for proxy handling
-        if (url.startsWith('wss://') || url.startsWith('ws://')) {
-            const wsUrl = new URL(url);
-            const httpUrl = (wsUrl.protocol === 'wss:' ? 'https:' : 'http:') + '//' + wsUrl.host + wsUrl.pathname + wsUrl.search;
-            console.log('[Proxy] WebSocket connection to:', httpUrl);
+        
+        // Override WebSocket for real-time connections - route through proxy
+        if (window.WebSocket) {
+            const OriginalWebSocket = window.WebSocket;
+            window.WebSocket = function(url, protocols) {
+                try {
+                    // Convert ws/wss URLs to use the WebSocket proxy endpoint
+                    if (url.startsWith('wss://') || url.startsWith('ws://')) {
+                        const wsProxyUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + 
+                                          '//' + window.location.host + '/bare/v1/ws?url=' + encodeURIComponent(url);
+                        return new OriginalWebSocket(wsProxyUrl, protocols);
+                    }
+                } catch (e) { /* fallback to original */ }
+                return new OriginalWebSocket(url, protocols);
+            };
+            window.WebSocket.prototype = OriginalWebSocket.prototype;
         }
-        return new OriginalWebSocket(url, protocols);
-    };
-    window.WebSocket.prototype = OriginalWebSocket.prototype;
+    } catch (e) {
+        // Script injection failed, continue without proxy overrides
+    }
 })();
 </script>`;
         
@@ -594,6 +646,14 @@ const server = app.listen(PORT, () => {
 // WebSocket Proxy Support for Real-time Gaming
 // ============================================
 server.on('upgrade', (req, socket, head) => {
+    // Apply rate limiting to WebSocket connections
+    const clientIp = getClientIp(req);
+    if (!checkRateLimit(clientIp)) {
+        socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+        socket.destroy();
+        return;
+    }
+
     const targetUrl = new URL(req.url, `http://${req.headers.host}`).searchParams.get('url');
     
     if (!targetUrl || !req.url.startsWith('/bare/v1/ws')) {
@@ -627,7 +687,15 @@ server.on('upgrade', (req, socket, head) => {
                         `Sec-WebSocket-Accept: ${proxyRes.headers['sec-websocket-accept']}\r\n` +
                         '\r\n');
 
-            proxySocket.write(head);
+            // Write any head data from the client to the proxy
+            if (head && head.length > 0) {
+                proxySocket.write(head);
+            }
+            // Write any head data from the proxy to the client
+            if (proxyHead && proxyHead.length > 0) {
+                socket.write(proxyHead);
+            }
+            
             proxySocket.pipe(socket);
             socket.pipe(proxySocket);
 

@@ -40,7 +40,8 @@ The proxy is optimized for:
 ## Configuration
 
 ```bash
-PORT=8080 npm start  # Change port (default: 3000)
+PORT=8080 npm start         # Change port (default: 3000)
+TRUST_PROXY=true npm start  # Trust X-Forwarded-For header (for reverse proxy setups)
 ```
 
 ## Rate Limiting
@@ -49,6 +50,9 @@ The server includes built-in rate limiting:
 - **Window**: 60 seconds
 - **Max Requests**: 100 per IP per window
 - Headers returned: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+- WebSocket connections are also rate limited
+
+**Security Note**: By default, the rate limiter uses the socket remote address. If you're behind a reverse proxy (like nginx or Cloudflare), set `TRUST_PROXY=true` to use the `X-Forwarded-For` header for client IP detection.
 
 ## API Response Headers
 
