@@ -1,6 +1,7 @@
 // Service Worker for now.gg proxy
 const CACHE_NAME = 'nowgg-proxy-v1';
 const NOW_GG_DOMAINS = ['now.gg', 'nowgg.me', 'play.now.gg'];
+const CACHEABLE_EXTENSIONS = ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2'];
 
 // Install event
 self.addEventListener('install', (event) => {
@@ -30,6 +31,12 @@ function isNowGgUrl(url) {
     }
 }
 
+// Check if URL is cacheable
+function isCacheable(url) {
+    const lowerUrl = url.toLowerCase();
+    return CACHEABLE_EXTENSIONS.some(ext => lowerUrl.endsWith(ext));
+}
+
 // Fetch event - intercept and proxy requests
 self.addEventListener('fetch', (event) => {
     const url = event.request.url;
@@ -45,21 +52,24 @@ self.addEventListener('fetch', (event) => {
                 // Build proxy URL
                 const proxyUrl = `/bare/v1/proxy?url=${encodeURIComponent(url)}`;
                 
-                // Clone the request with credentials
-                const proxyRequest = new Request(proxyUrl, {
+                // Create proxy request
+                const requestInit = {
                     method: event.request.method,
                     headers: event.request.headers,
-                    body: event.request.method !== 'GET' && event.request.method !== 'HEAD' 
-                        ? await event.request.clone().blob() 
-                        : undefined,
                     credentials: 'include',
                     mode: 'cors'
-                });
+                };
 
+                // Only include body for methods that support it
+                if (event.request.method !== 'GET' && event.request.method !== 'HEAD') {
+                    requestInit.body = event.request.body;
+                }
+                
+                const proxyRequest = new Request(proxyUrl, requestInit);
                 const response = await fetch(proxyRequest);
                 
                 // Cache static assets
-                if (response.ok && (url.endsWith('.js') || url.endsWith('.css') || url.endsWith('.png') || url.endsWith('.jpg'))) {
+                if (response.ok && isCacheable(url)) {
                     const cache = await caches.open(CACHE_NAME);
                     cache.put(event.request, response.clone());
                 }

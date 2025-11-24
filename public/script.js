@@ -4,6 +4,7 @@
 
     const NOW_GG_URL = 'https://now.gg';
     const PROXY_ENDPOINT = '/bare/v1/proxy';
+    const LOAD_TIMEOUT_MS = 30000;
     
     let iframe = null;
     let loading = null;
@@ -38,10 +39,9 @@
     async function registerServiceWorker() {
         if ('serviceWorker' in navigator) {
             try {
-                const registration = await navigator.serviceWorker.register('/sw.js');
-                console.log('Service worker registered');
+                await navigator.serviceWorker.register('/sw.js');
             } catch (err) {
-                console.log('Service worker registration skipped:', err.message);
+                // Service worker registration is optional
             }
         }
     }
@@ -61,7 +61,7 @@
         // Set timeout for loading
         loadTimeout = setTimeout(() => {
             showError('Loading timed out. Please retry.');
-        }, 30000);
+        }, LOAD_TIMEOUT_MS);
 
         // Clear iframe and load
         iframe.src = '';

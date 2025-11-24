@@ -17,8 +17,8 @@ app.use(cors({
 }));
 
 // Parse request bodies
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -120,12 +120,15 @@ function proxyRequest(targetUrl, req, res) {
                     stream.on('end', () => {
                         let html = Buffer.concat(chunks).toString('utf8');
                         
-                        // Remove frame-busting JavaScript
-                        html = html.replace(/if\s*\(\s*top\s*!==?\s*self\s*\)[^}]*\}/gi, '');
-                        html = html.replace(/if\s*\(\s*window\s*!==?\s*top\s*\)[^}]*\}/gi, '');
-                        html = html.replace(/if\s*\(\s*parent\s*!==?\s*window\s*\)[^}]*\}/gi, '');
-                        html = html.replace(/top\.location\s*=\s*self\.location/gi, '');
-                        html = html.replace(/top\.location\.href\s*=/gi, '// ');
+                        // Remove common frame-busting patterns
+                        // Pattern: if (top !== self) { top.location = self.location; }
+                        html = html.replace(/if\s*\(\s*top\s*!==?\s*self\s*\)\s*\{\s*top\.location\s*=\s*[^;]+;\s*\}/gi, '');
+                        // Pattern: if (window !== top) { ... }
+                        html = html.replace(/if\s*\(\s*window\s*!==?\s*top\s*\)\s*\{\s*[^}]*\}/gi, '');
+                        // Pattern: top.location = self.location (standalone)
+                        html = html.replace(/top\.location\s*=\s*self\.location\s*;?/gi, '');
+                        // Pattern: top.location.href = ... (redirect)
+                        html = html.replace(/top\.location\.href\s*=\s*[^;]+;/gi, '');
 
                         // Remove content-encoding since we decompressed
                         delete headers['content-encoding'];
