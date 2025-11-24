@@ -137,9 +137,34 @@ const NOW_GG_DOMAINS = [
 // URL Rewriting Functions for Scramjet Proxying
 // ============================================
 
+// List of URL schemes that should not be proxied
+const SKIP_URL_SCHEMES = [
+    '#',           // Anchors
+    'javascript:', // JavaScript URLs
+    'data:',       // Data URLs
+    'blob:',       // Blob URLs
+    'mailto:',     // Email links
+    'tel:',        // Phone links
+    'vbscript:',   // VBScript URLs (potential XSS vector)
+    'about:',      // About URLs
+    'file:'        // File URLs
+];
+
+// Check if URL should be skipped from proxying
+function shouldSkipUrl(url) {
+    if (!url || typeof url !== 'string') return true;
+    const lowerUrl = url.toLowerCase().trim();
+    return SKIP_URL_SCHEMES.some(scheme => lowerUrl.startsWith(scheme));
+}
+
 // Create proxy URL for a given target URL
 function createProxyUrl(targetUrl, baseUrl) {
     try {
+        // Skip special URL schemes
+        if (shouldSkipUrl(targetUrl)) {
+            return targetUrl;
+        }
+        
         // Handle relative URLs
         let absoluteUrl;
         if (targetUrl.startsWith('//')) {
@@ -170,9 +195,7 @@ function rewriteHtmlUrls(html, baseUrl) {
         html = html.replace(
             /(<(?:a|link)[^>]*\s+href\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
             (match, prefix, url, suffix) => {
-                // Skip anchors, javascript:, data:, and mailto: URLs
-                if (url.startsWith('#') || url.startsWith('javascript:') || 
-                    url.startsWith('data:') || url.startsWith('mailto:')) {
+                if (shouldSkipUrl(url)) {
                     return match;
                 }
                 const proxiedUrl = createProxyUrl(url, baseUrl);
@@ -184,8 +207,7 @@ function rewriteHtmlUrls(html, baseUrl) {
         html = html.replace(
             /(<(?:img|script|iframe|source|video|audio|embed)[^>]*\s+src\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
             (match, prefix, url, suffix) => {
-                // Skip data: and blob: URLs
-                if (url.startsWith('data:') || url.startsWith('blob:')) {
+                if (shouldSkipUrl(url)) {
                     return match;
                 }
                 const proxiedUrl = createProxyUrl(url, baseUrl);
@@ -212,7 +234,7 @@ function rewriteHtmlUrls(html, baseUrl) {
         html = html.replace(
             /(<form[^>]*\s+action\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
             (match, prefix, url, suffix) => {
-                if (url.startsWith('javascript:')) {
+                if (shouldSkipUrl(url)) {
                     return match;
                 }
                 const proxiedUrl = createProxyUrl(url, baseUrl);
@@ -224,6 +246,9 @@ function rewriteHtmlUrls(html, baseUrl) {
         html = html.replace(
             /(<video[^>]*\s+poster\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
             (match, prefix, url, suffix) => {
+                if (shouldSkipUrl(url)) {
+                    return match;
+                }
                 const proxiedUrl = createProxyUrl(url, baseUrl);
                 return prefix + proxiedUrl + suffix;
             }
@@ -233,7 +258,7 @@ function rewriteHtmlUrls(html, baseUrl) {
         html = html.replace(
             /url\s*\(\s*["']?([^"')]+)["']?\s*\)/gi,
             (match, url) => {
-                if (url.startsWith('data:') || url.startsWith('blob:')) {
+                if (shouldSkipUrl(url)) {
                     return match;
                 }
                 const proxiedUrl = createProxyUrl(url, baseUrl);
