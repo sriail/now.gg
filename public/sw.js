@@ -1,7 +1,21 @@
 // Service Worker for now.gg proxy
-const CACHE_NAME = 'nowgg-proxy-v1';
-const NOW_GG_DOMAINS = ['now.gg', 'nowgg.me', 'play.now.gg'];
-const CACHEABLE_EXTENSIONS = ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2'];
+const CACHE_NAME = 'nowgg-proxy-v2';
+const NOW_GG_DOMAINS = [
+    'now.gg',
+    'nowgg.me',
+    'play.now.gg',
+    'accounts.now.gg',
+    'api.now.gg',
+    'cdn.now.gg',
+    'assets.now.gg',
+    'static.now.gg',
+    'roblox.com',
+    'rbxcdn.com',
+    'roblox.qq.com',
+    'robloxlabs.com',
+    'rbx.com'
+];
+const CACHEABLE_EXTENSIONS = ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2', '.ico', '.webp'];
 
 // Install event
 self.addEventListener('install', (event) => {

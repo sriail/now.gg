@@ -190,6 +190,78 @@ function testCORS() {
     });
 }
 
+// Test 6: Rate limiting headers
+function testRateLimitHeaders() {
+    return new Promise((resolve) => {
+        console.log('6. Testing rate limiting headers...');
+
+        const req = http.request({
+            hostname: HOST,
+            port: PORT,
+            path: '/bare/v1/proxy?url=https://example.com',
+            method: 'GET'
+        }, (res) => {
+            const hasLimit = res.headers['x-ratelimit-limit'];
+            const hasRemaining = res.headers['x-ratelimit-remaining'];
+            const hasReset = res.headers['x-ratelimit-reset'];
+            
+            if (hasLimit && hasRemaining && hasReset) {
+                console.log('   OK - Rate limit headers present\n');
+                resolve(true);
+            } else {
+                console.log('   FAIL - Missing rate limit headers\n');
+                resolve(false);
+            }
+        });
+
+        req.on('error', (error) => {
+            console.log(`   FAIL: ${error.message}\n`);
+            resolve(false);
+        });
+
+        req.end();
+    });
+}
+
+// Test 7: Info endpoint version check
+function testInfoVersion() {
+    return new Promise((resolve) => {
+        console.log('7. Testing info endpoint version...');
+
+        const req = http.request({
+            hostname: HOST,
+            port: PORT,
+            path: '/bare/v1/info',
+            method: 'GET'
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    if (json.version === '2.0.0' && json.features && json.features.rateLimiting) {
+                        console.log('   OK - Info version and features correct\n');
+                        resolve(true);
+                    } else {
+                        console.log('   FAIL - Wrong version or missing features\n');
+                        resolve(false);
+                    }
+                } catch (error) {
+                    console.log('   FAIL - Invalid JSON\n');
+                    resolve(false);
+                }
+            });
+        });
+
+        req.on('error', (error) => {
+            console.log(`   FAIL: ${error.message}\n`);
+            resolve(false);
+        });
+
+        req.end();
+    });
+}
+
 // Run all tests
 async function runTests() {
     const results = [];
@@ -199,6 +271,8 @@ async function runTests() {
     results.push(await testStatic());
     results.push(await testProxyError());
     results.push(await testCORS());
+    results.push(await testRateLimitHeaders());
+    results.push(await testInfoVersion());
 
     const passed = results.filter(r => r).length;
     const total = results.length;
